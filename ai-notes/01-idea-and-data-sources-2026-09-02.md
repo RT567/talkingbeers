@@ -37,4 +37,4 @@ offline and committed as JSON, or fetched client-side from sources that allow CO
 
 ## Data-source research
 
-(To be filled in from the 2026-09-02 research pass — see the section appended below.)
+See **02-data-source-research-2026-09-02.md**. Short version: two community aggregators (The Happiest Hour, Eat Drink Cheap) have undocumented JSON APIs with ~2,000+ Sydney specials each, including coordinates and day/time windows; nothing else comes close. Lime AU GBFS feeds currently 404.
