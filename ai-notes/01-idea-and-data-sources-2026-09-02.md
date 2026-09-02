@@ -20,7 +20,9 @@ So two halves:
    `sydney_au`, `melbourne`, and Sydney isn't in MobilityData's systems.csv — so the real feed (if
    any) has to come from Transport for NSW Open Data or a different Lime slug. Research pending.
 
-Name: "talkingbeers". Hosting expectation, by analogy with the other projects: static site on
+Name: "talkingbeers". Tagline (Rob, 2026-09-02, keep verbatim incl. spelling): **"These beers are fuckin talkin. So its time to get walkin"**.
+
+Hosting: live at https://rt567.github.io/talkingbeers/ (repo github.com/RT567/talkingbeers, branch `master`, Pages serves `/`; created 2026-09-02 with a placeholder page; linked from the root landing page). Original hosting expectation, by analogy with the other projects: static site on
 GitHub Pages under rt567.github.io/talkingbeers, no server if avoidable (so data either scraped
 offline and committed as JSON, or fetched client-side from sources that allow CORS).
 
