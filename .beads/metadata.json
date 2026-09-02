@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "talkingbeers",
+  "project_id": "41fe814f-365d-45e1-b852-b266eb42e294"
+}
