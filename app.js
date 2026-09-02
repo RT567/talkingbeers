@@ -117,7 +117,7 @@ function plan() {
 const cmp = (a, b) => { for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return a[i] > b[i] ? 1 : -1; return 0; };
 
 // ---------------------------------------------------------------- map
-const map = L.map("map", { zoomControl: true }).setView([DEFAULT_START.lat, DEFAULT_START.lng], 14);
+const map = L.map("map", { zoomControl: true, zoomSnap: 0.25, zoomDelta: 0.5, wheelPxPerZoomLevel: 120 }).setView([DEFAULT_START.lat, DEFAULT_START.lng], 14);
 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(map);
 const venueLayer = L.layerGroup().addTo(map), routeLayer = L.layerGroup().addTo(map);
 const legend = L.control({ position: "bottomleft" });
