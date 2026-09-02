@@ -13,9 +13,14 @@ Live at https://rt567.github.io/talkingbeers/ — three pieces, all in this repo
                   days:["mon".."sun"], start:"HH:MM"|null, end:"HH:MM"|null, source:"hh"|"edc", source_url, updated } ] }
    ```
    - `start/end` null = all day. `end <= start` means it runs past midnight (the JS adds 24 h).
-   - Drink filter: EDC `type_slugs` ∈ a drink set, or a `\b`-bounded keyword list (`DRINK_WORDS`) over deal+blurb,
-     after stripping "beer battered"/"wine sauce"-style false friends (`NOT_DRINK_RE`). First run: HH 727 raw →
-     752 windows (per-day `timeslots` expanded), EDC 521 venues → 2058 specials; **1602 drink specials** survive.
+   - Drink filter (`is_drink`, tightened later on 2026-09-02 after Rob saw wings deals in a crawl): the **title
+     decides**. Happy hour in title/tag passes unless the title names only food ("Oyster Happy Hour" is out);
+     a drink word in the title with no food word passes ("$13 Martini Monday"); any food word or food tag in the
+     title fails ("Parma & Pint", "$35 Wingsday", "Steak & Wine"); otherwise fall back to EDC drink tags or a
+     "$N <drink>" / "<drink> for $N" pattern in the blurb. Word lists: `DRINK_WORDS`, `FOOD_WORDS`, `EDC_*_SLUGS`;
+     `NOT_DRINK_RE` strips "beer battered"/"wine sauce". First run: HH 727 raw → 752 windows (per-day
+     `timeslots` expanded), EDC 521 venues → 2058 specials; **~1000 drink specials** survive (1602 under the
+     first, looser filter).
    - `price` = cheapest `$` figure that sits right before a drink word, else cheapest `$` figure anywhere. It's a hint.
    - Flags: `--raw-dir DIR` saves every response; `--from-raw DIR` re-normalises without hitting the network (use
      this while tweaking the filter); `--all` keeps food specials (adds a `drink` bool); `--skip hh|edc`.
@@ -30,8 +35,14 @@ Live at https://rt567.github.io/talkingbeers/ — three pieces, all in this repo
    deals work). From the current position/time, each candidate is scored `value / (travel + wait + 8)` where
    `value = 10 + max(0, 15 - price) + 3 if happy hour` (+1000 if pinned); must arrive ≥15 min before the deal ends,
    wait ≤ 30 min for one to start. 60 runs (first purely greedy, rest pick randomly among the top 3), best by
-   (pins hit, stops, total value, −travel). Travel = haversine × 1.3 at 4.8 km/h walking or 14 km/h Lime + 3 min
-   per leg to find a bike. Legs are drawn as straight dashed lines — no routing engine.
+   (pins hit, stops, total value, −travel). Planning uses haversine × 1.3 at 4.8 km/h walking or 14 km/h Lime
+   + 3 min per leg to find a bike. **Then the chosen order is routed for real** through OSRM on the FOSSGIS
+   public instance (`routing.openstreetmap.de/routed-foot` or `routed-bike`, CORS ok, no key): the itinerary is
+   re-timed with real leg durations (a stop that would now miss its window gets a ⚠), each leg gets turn-by-turn
+   directions built from OSRM steps, and the map draws the simplified route geometry run through a 20 m
+   Douglas-Peucker so it doesn't zigzag kerb to kerb (Rob: "too accurate"). If OSRM fails it falls back to
+   straight dashed lines. Base map: Esri World Street Map tiles (OSM default was too busy for Rob; CARTO now
+   watermarks "API key required").
 4. **`.github/workflows/scrape.yml`** — runs the scraper 07:17 and 14:17 Sydney time and commits
    `data/specials.json` if it changed. Needs Actions enabled with write permission on the repo (default for
    `permissions: contents: write`). *Unverified until the first scheduled run* — check the Actions tab tomorrow.
@@ -47,7 +58,6 @@ Live at https://rt567.github.io/talkingbeers/ — three pieces, all in this repo
 ## Still to do / ideas
 
 - Verify the GitHub Action ran and Pages picked up `app.js` (Pages serves `/` on `master`).
-- Real walking routes (OSRM/Valhalla public demo servers, or OpenRouteService with a key) instead of straight lines.
 - Share a crawl via URL hash (day, time, mode, start, pins).
 - "Add a special" path for same-day Instagram-style deals (doc 02 §4).
 - Venue universe from OSM so pubs with no known deal still show.

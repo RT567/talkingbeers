@@ -41,11 +41,23 @@ DRINK_WORDS = [
 ]
 DRINK_RE = re.compile(r"\b(" + "|".join(DRINK_WORDS) + r")\b", re.I)
 NOT_DRINK_RE = re.compile(r"beer[- ]?battered|wine[- ]?(sauce|jus|braised)|rum\s*(ball|cake)|gin(ger)|can(s)?\s*of\s*(tuna|coke)", re.I)
+FOOD_WORDS = [
+    "wings?", "burgers?", "parm[ai]s?", "parmigianas?", "schnit(zel|ty|ties|zels)", "schnitz", "steaks?", "pizzas?", "tacos?", "roasts?", "pastas?",
+    "curr(y|ies)", "oysters?", "fish", "chips", "lunch(es)?", "dinners?", "meals?", "brunch", "dumplings?", "ribs", "wagyu",
+    "sangas?", "sandwich(es)?", "salads?", "breakfasts?", "mains?", "feasts?", "kids", "carver(y|ies)", "buffets?", "ramen",
+    "noodles?", "sushi", "nachos", "wraps?", "pies?", "bao", "banquets?", "platters?", "souvlaki", "kebabs?", "chicken", "beef",
+    "lamb", "pork", "seafood", "prawns?", "eats?", "food", "bites", "menu", "pizza", "dogs?", "fries", "toasties?", "bangers",
+    "eat", "wingsday", "burger",
+]
+FOOD_RE = re.compile(r"\b(" + "|".join(FOOD_WORDS) + r")\b", re.I)
+EDC_FOOD_SLUGS = {"steak", "burger", "schnitzel", "lunch", "roast", "pizza", "parma", "adult-happymeal", "wings", "tacos", "pasta",
+                  "fish-chips", "oysters", "kids", "curry", "pie", "ribs", "seafood", "breakfast", "vegan", "vegetarian", "steak-sanga"}
 EDC_DRINK_SLUGS = {"happy-hour", "pints", "schooners", "wines", "wine", "cocktails", "spirits",
                    "beer", "beers", "drinks", "bottomless-brunch", "bougie", "jugs", "cider",
                    "bubbles", "shots", "tap-beer"}
 PRICE_RE = re.compile(r"\$\s?(\d{1,3}(?:\.\d{1,2})?)")
-PRICE_NEAR_DRINK_RE = re.compile(r"\$\s?(\d{1,3}(?:\.\d{1,2})?)(?:\s*(?:[a-z'&-]+\s+){0,3})?\s*\b(" + "|".join(DRINK_WORDS) + r")\b", re.I)
+DRINK_THEN_PRICE_RE = re.compile(r"\b(" + "|".join(DRINK_WORDS) + r")\b(?:\s+[a-z'&-]+){0,3}\s*(?:for|from|at|@|-|–|only|just)?\s*\$\s?(?P<price>\d{1,3}(?:\.\d{1,2})?)", re.I)
+PRICE_NEAR_DRINK_RE = re.compile(r"\$\s?(\d{1,3}(?:\.\d{1,2})?)(?:\s*(?:[a-z0-9'&-]+\s+){0,3})?\s*\b(" + "|".join(DRINK_WORDS) + r")\b", re.I)
 
 
 def get_json(url, raw_dir=None, tag=None):
@@ -66,17 +78,29 @@ def get_json(url, raw_dir=None, tag=None):
     return json.loads(body)
 
 
-def is_drink(text, slugs=()):
-    if any(s in EDC_DRINK_SLUGS for s in slugs):
+def is_drink(title, blurb, slugs=()):
+    """A *drink* deal, not a meal with a drink attached. The title decides: 'Parma & Pint' and '$35 Wingsday'
+    are food; '$7 Happy Hour', '$13 Martini Monday', 'Beer Wine Spirits' are drink. Untitled-ish deals fall
+    back to tags and to '$N <drink>' / '<drink> for $N' in the blurb, but never when the title names food."""
+    title = NOT_DRINK_RE.sub(" ", title or ""); blurb = NOT_DRINK_RE.sub(" ", blurb or "")
+    food_t, drink_t = bool(FOOD_RE.search(title)), bool(DRINK_RE.search(title))
+    happy = bool(re.search(r"happy\s*hour", title, re.I)) or "happy-hour" in slugs
+    if happy:
+        return not (food_t and not drink_t)          # "Oyster Happy Hour" is food; "Wings & Beer Happy Hour" passes
+    if drink_t and not food_t:
         return True
-    return bool(DRINK_RE.search(NOT_DRINK_RE.sub(" ", text or "")))
+    if food_t or any(t in EDC_FOOD_SLUGS for t in slugs):
+        return False
+    if any(t in EDC_DRINK_SLUGS for t in slugs):
+        return True
+    return bool(PRICE_NEAR_DRINK_RE.search(blurb) or DRINK_THEN_PRICE_RE.search(blurb))
 
 
 def price_hint(text):
     """Cheapest $ figure that sits right before a drink word ("$7 schooners", "$12 Aperol spritz");
     falls back to the cheapest $ figure anywhere in the text."""
     text = re.sub(r"\$\s?\d+(\.\d+)?\s*off\b", " ", NOT_DRINK_RE.sub(" ", text or ""), flags=re.I)  # "$1 off" isn't a price
-    near = [float(m.group(1)) for m in PRICE_NEAR_DRINK_RE.finditer(text)]
+    near = [float(m.group(1)) for m in PRICE_NEAR_DRINK_RE.finditer(text)] + [float(m.group("price")) for m in DRINK_THEN_PRICE_RE.finditer(text)]
     near = [p for p in near if 3 <= p <= 100]     # no drink costs under $3; $1 is wings or oysters
     if near:
         return min(near)
@@ -132,7 +156,7 @@ def norm_hh(rec):
         "deal": (rec.get("title") or "").strip(),
         "blurb": (rec.get("content") or "").strip(),
         "price": price_hint(text),
-        "drink": is_drink(text),
+        "drink": is_drink(rec.get("title"), rec.get("content")),
         "tags": [],
         "source": "hh",
         "source_url": f"https://thehappiesthour.com/venues/sydney/{v.get('slug')}",
@@ -214,7 +238,7 @@ def norm_edc(v):
             "deal": (s.get("name") or "").strip(),
             "blurb": (s.get("blurb") or "").strip(),
             "price": price_hint(text),
-            "drink": is_drink(text, slugs),
+            "drink": is_drink(s.get("name"), s.get("blurb"), slugs),
             "tags": slugs,
             "days": days, "start": hhmm(s.get("starts")), "end": hhmm(s.get("ends")),
             "source": "edc",

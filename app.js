@@ -125,16 +125,33 @@ const cmp = (a, b) => { for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) re
 const OSRM = { walk: "https://routing.openstreetmap.de/routed-foot/route/v1/foot/", lime: "https://routing.openstreetmap.de/routed-bike/route/v1/bike/" };
 async function fetchRealRoute(points, mode) {
   const coords = points.map(p => `${p.lng.toFixed(6)},${p.lat.toFixed(6)}`).join(";");
-  const r = await fetch(`${OSRM[mode]}${coords}?overview=full&geometries=geojson&steps=true`);
+  const r = await fetch(`${OSRM[mode]}${coords}?overview=simplified&geometries=geojson&steps=true`);
   if (!r.ok) throw new Error(`OSRM ${r.status}`);
   const j = await r.json();
   if (j.code !== "Ok" || !j.routes?.length) throw new Error(j.code || "no route");
   const route = j.routes[0];
-  return route.legs.map((leg, i) => ({
-    km: leg.distance / 1000, min: leg.duration / 60 + MODES[mode].overhead,
-    shape: leg.steps.flatMap(st => st.geometry.coordinates.map(([lng, lat]) => [lat, lng])),
-    steps: leg.steps.map(stepText).filter(Boolean),
-  }));
+  const legs = route.legs.map(leg => ({ km: leg.distance / 1000, min: leg.duration / 60 + MODES[mode].overhead, steps: leg.steps.map(stepText).filter(Boolean) }));
+  legs.shape = simplify(route.geometry.coordinates.map(([lng, lat]) => [lat, lng]), 20);  // drop kerb-to-kerb jogs under ~20 m
+  return legs;
+}
+// Douglas-Peucker in metres (equirectangular; fine at city scale)
+function simplify(pts, tolM) {
+  if (pts.length < 3) return pts;
+  const kx = 111320 * Math.cos(pts[0][0] * Math.PI / 180), ky = 110540;
+  const P = pts.map(([lat, lng]) => [lng * kx, lat * ky]);
+  const keep = new Uint8Array(pts.length); keep[0] = keep[pts.length - 1] = 1;
+  const stack = [[0, pts.length - 1]];
+  while (stack.length) {
+    const [a, b] = stack.pop(); let maxD = 0, idx = -1;
+    const [ax, ay] = P[a], [bx, by] = P[b], dx = bx - ax, dy = by - ay, len2 = dx * dx + dy * dy;
+    for (let i = a + 1; i < b; i++) {
+      const [px, py] = P[i]; let t = len2 ? ((px - ax) * dx + (py - ay) * dy) / len2 : 0; t = Math.max(0, Math.min(1, t));
+      const d = Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+      if (d > maxD) { maxD = d; idx = i; }
+    }
+    if (maxD > tolM) { keep[idx] = 1; stack.push([a, idx], [idx, b]); }
+  }
+  return pts.filter((_, i) => keep[i]);
 }
 function stepText(st) {
   const m = st.maneuver, name = st.name ? ` onto ${st.name}` : "", d = st.distance >= 1000 ? `${(st.distance / 1000).toFixed(1)} km` : `${Math.round(st.distance)} m`;
@@ -203,10 +220,10 @@ function renderRoute() {
   const r = state.route, el = $("itin");
   if (!r || !r.stops.length) { el.innerHTML = `<p class="summary">No specials reachable in that window. Try a longer crawl, another day, or fewer filters.</p>`; return; }
   const pts = [[state.start.lat, state.start.lng], ...r.stops.map(x => [x.c.v.lat, x.c.v.lng])];
-  if (r.real) r.real.forEach(leg => L.polyline(leg.shape, { color: "#1d1a14", weight: 4, opacity: .85 }).addTo(routeLayer));
+  if (r.real) L.polyline(r.real.shape, { color: "#1d1a14", weight: 4, opacity: .8, smoothFactor: 1.5, lineJoin: "round", lineCap: "round" }).addTo(routeLayer);
   else L.polyline(pts, { color: "#1d1a14", weight: 3, dashArray: "6 6", opacity: .8 }).addTo(routeLayer);
   r.stops.forEach((x, i) => L.marker([x.c.v.lat, x.c.v.lng], { icon: L.divIcon({ className: "", html: `<div class="numicon">${i + 1}</div>`, iconSize: [24, 24], iconAnchor: [12, 12] }), zIndexOffset: 1000 }).bindPopup(() => popupHtml(x.c.v, r.T0, r.T1), { maxWidth: 320 }).addTo(routeLayer));
-  map.fitBounds(r.real ? r.real.flatMap(l => l.shape) : pts, { padding: [30, 30] });
+  map.fitBounds(r.real ? r.real.shape : pts, { padding: [30, 30] });
   const distTot = r.stops.reduce((a, x) => a + x.dist, 0), trTot = r.stops.reduce((a, x) => a + x.tr + x.wait, 0);
   const modeLbl = r.mode === "walk" ? "walking" : "on a Lime";
   el.innerHTML = `<p class="summary"><b>${r.stops.length} stops</b>, ${distTot.toFixed(1)} km ${modeLbl}, ${Math.round(trTot)} min in transit. ${DAYLBL[state.day]} ${fmt(r.T0)} → ${fmt(r.stops[r.stops.length - 1].leave)}.</p><ol>` +
