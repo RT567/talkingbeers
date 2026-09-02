@@ -113,12 +113,54 @@ function plan() {
   state.route = best;
   renderRoute();
   $("itin").scrollIntoView({ behavior: "smooth", block: "nearest" });
+  if (best && best.stops.length) {
+    const pts = [state.start, ...best.stops.map(x => x.c.v)];
+    fetchRealRoute(pts, best.mode).then(legs => { if (state.route !== best) return; best.real = legs; retime(best); renderRoute(); })
+      .catch(e => { console.warn("routing failed, keeping straight lines", e); best.routeError = true; renderRoute(); });
+  }
 }
 const cmp = (a, b) => { for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return a[i] > b[i] ? 1 : -1; return 0; };
 
+// ---------------------------------------------------------------- real routes (OSRM, FOSSGIS public instance)
+const OSRM = { walk: "https://routing.openstreetmap.de/routed-foot/route/v1/foot/", lime: "https://routing.openstreetmap.de/routed-bike/route/v1/bike/" };
+async function fetchRealRoute(points, mode) {
+  const coords = points.map(p => `${p.lng.toFixed(6)},${p.lat.toFixed(6)}`).join(";");
+  const r = await fetch(`${OSRM[mode]}${coords}?overview=full&geometries=geojson&steps=true`);
+  if (!r.ok) throw new Error(`OSRM ${r.status}`);
+  const j = await r.json();
+  if (j.code !== "Ok" || !j.routes?.length) throw new Error(j.code || "no route");
+  const route = j.routes[0];
+  return route.legs.map((leg, i) => ({
+    km: leg.distance / 1000, min: leg.duration / 60 + MODES[mode].overhead,
+    shape: leg.steps.flatMap(st => st.geometry.coordinates.map(([lng, lat]) => [lat, lng])),
+    steps: leg.steps.map(stepText).filter(Boolean),
+  }));
+}
+function stepText(st) {
+  const m = st.maneuver, name = st.name ? ` onto ${st.name}` : "", d = st.distance >= 1000 ? `${(st.distance / 1000).toFixed(1)} km` : `${Math.round(st.distance)} m`;
+  const mod = (m.modifier || "").replace("uturn", "U-turn");
+  if (m.type === "arrive") return null;
+  if (m.type === "depart") return `Head ${mod || "off"}${st.name ? ` along ${st.name}` : ""} · ${d}`;
+  const verb = { turn: "Turn", "end of road": "At the end, turn", continue: "Continue", "new name": "Continue", fork: "Keep", merge: "Merge", roundabout: "Take the roundabout", rotary: "Take the roundabout", "exit roundabout": "Exit the roundabout", "on ramp": "Take the ramp", "off ramp": "Take the ramp", notification: "Continue" }[m.type] || "Continue";
+  if (mod === "straight") return `Go straight${name} · ${d}`;
+  return `${verb} ${mod}${name} · ${d}`;
+}
+// re-time the planned stops with real leg durations; flag any that now miss their window
+function retime(r) {
+  let t = r.T0;
+  r.stops.forEach((x, i) => {
+    const leg = r.real[i], dwell = x.leave - x.arrive;
+    x.dist = leg.km; x.tr = leg.min;
+    let arrive = t + leg.min; x.wait = 0;
+    if (arrive < x.c.ws) { x.wait = x.c.ws - arrive; arrive = x.c.ws; }
+    x.arrive = arrive; x.leave = arrive + dwell; x.late = arrive + MIN_DWELL > x.c.we;
+    t = x.leave;
+  });
+}
+
 // ---------------------------------------------------------------- map
 const map = L.map("map", { zoomControl: true, zoomSnap: 0.25, zoomDelta: 0.5, wheelPxPerZoomLevel: 120 }).setView([DEFAULT_START.lat, DEFAULT_START.lng], 14);
-L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(map);
+L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}", { maxZoom: 19, attribution: 'Tiles © <a href="https://www.esri.com/">Esri</a>' }).addTo(map);
 const venueLayer = L.layerGroup().addTo(map), routeLayer = L.layerGroup().addTo(map);
 const legend = L.control({ position: "bottomleft" });
 legend.onAdd = () => { const d = L.DomUtil.create("div", "legend"); d.innerHTML = '<span class="sw live"></span> on during your window <span class="sw off"></span> other times <span class="sw start"></span> start'; return d; };
@@ -141,12 +183,11 @@ function renderVenues() {
     if (!matching.length) continue;
     const live = venueOnDuring(v, T0, T1); if (live) on++;
     const pinned = state.pins.has(v.id);
-    const m = L.circleMarker([v.lat, v.lng], { radius: live ? 7 : 4, color: pinned ? "#1d1a14" : live ? "#b8801a" : "#999", weight: pinned ? 3 : 1.5, fillColor: live ? "#e0a323" : "#ccc", fillOpacity: .85 });
+    const m = L.circleMarker([v.lat, v.lng], { radius: live ? 7 : 4, color: pinned ? "#1d1a14" : live ? "#b8801a" : "#fff", weight: pinned ? 3 : 1.5, fillColor: live ? "#e0a323" : "#7a7a7a", fillOpacity: .9 });
     m.bindPopup(() => popupHtml(v, T0, T1), { maxWidth: 320 });
     m.addTo(venueLayer);
   }
   $("pins").textContent = state.pins.size ? `Pinned: ${[...state.pins].map(id => state.venues[id].name).join(", ")}` : "";
-  document.title = `talkingbeers — ${on} venues with a drink special on ${DAYLBL[state.day]} ${fmt(T0)}–${fmt(T1)}`;
 }
 function popupHtml(v, T0, T1) {
   const items = v.specials.filter(specialMatches).map(s => {
@@ -162,14 +203,15 @@ function renderRoute() {
   const r = state.route, el = $("itin");
   if (!r || !r.stops.length) { el.innerHTML = `<p class="summary">No specials reachable in that window. Try a longer crawl, another day, or fewer filters.</p>`; return; }
   const pts = [[state.start.lat, state.start.lng], ...r.stops.map(x => [x.c.v.lat, x.c.v.lng])];
-  L.polyline(pts, { color: "#1d1a14", weight: 3, dashArray: "6 6", opacity: .8 }).addTo(routeLayer);
+  if (r.real) r.real.forEach(leg => L.polyline(leg.shape, { color: "#1d1a14", weight: 4, opacity: .85 }).addTo(routeLayer));
+  else L.polyline(pts, { color: "#1d1a14", weight: 3, dashArray: "6 6", opacity: .8 }).addTo(routeLayer);
   r.stops.forEach((x, i) => L.marker([x.c.v.lat, x.c.v.lng], { icon: L.divIcon({ className: "", html: `<div class="numicon">${i + 1}</div>`, iconSize: [24, 24], iconAnchor: [12, 12] }), zIndexOffset: 1000 }).bindPopup(() => popupHtml(x.c.v, r.T0, r.T1), { maxWidth: 320 }).addTo(routeLayer));
-  map.fitBounds(pts, { padding: [30, 30] });
+  map.fitBounds(r.real ? r.real.flatMap(l => l.shape) : pts, { padding: [30, 30] });
   const distTot = r.stops.reduce((a, x) => a + x.dist, 0), trTot = r.stops.reduce((a, x) => a + x.tr + x.wait, 0);
   const modeLbl = r.mode === "walk" ? "walking" : "on a Lime";
   el.innerHTML = `<p class="summary"><b>${r.stops.length} stops</b>, ${distTot.toFixed(1)} km ${modeLbl}, ${Math.round(trTot)} min in transit. ${DAYLBL[state.day]} ${fmt(r.T0)} → ${fmt(r.stops[r.stops.length - 1].leave)}.</p><ol>` +
-    r.stops.map((x, i) => `<li><div class="leg">${x.dist.toFixed(1)} km · ${Math.round(x.tr)} min ${modeLbl}${x.wait ? ` · wait ${Math.round(x.wait)} min for it to start` : ""}</div><b>${i + 1}. ${esc(x.c.v.name)} <span class="t">${fmt(x.arrive)}–${fmt(x.leave)}</span></b><span class="deal">${esc(x.c.s.deal)}${x.c.s.price != null ? ` · $${x.c.s.price}` : ""}</span><br><span class="t">on ${fmtWin(x.c.s)}</span> · <a href="${esc(x.c.s.source_url)}" target="_blank" rel="noopener">source ↗</a></li>`).join("") +
-    `</ol><p class="hint">Straight-line distances × 1.3. Windows come from venue listings, so ring ahead if it matters.</p>`;
+    r.stops.map((x, i) => `<li><div class="leg">${x.dist.toFixed(1)} km · ${Math.round(x.tr)} min ${modeLbl}${x.wait ? ` · wait ${Math.round(x.wait)} min for it to start` : ""}${r.real?.[i]?.steps.length ? ` <details class="dirs"><summary>directions</summary><ol>${r.real[i].steps.map(t => `<li>${esc(t)}</li>`).join("")}</ol></details>` : ""}</div><b>${i + 1}. ${esc(x.c.v.name)} <span class="t">${fmt(x.arrive)}–${fmt(x.leave)}</span>${x.late ? ' <span class="late">⚠ might miss it</span>' : ""}</b><span class="deal">${esc(x.c.s.deal)}${x.c.s.price != null ? ` · $${x.c.s.price}` : ""}</span><br><span class="t">on ${fmtWin(x.c.s)}</span> · <a href="${esc(x.c.s.source_url)}" target="_blank" rel="noopener">source ↗</a></li>`).join("") +
+    `</ol><p class="hint">${r.real ? "Street routes and times from OSRM." : r.routeError ? "Routing server didn't answer — straight-line distances × 1.3." : "Fetching street routes…"} Windows come from venue listings, so ring ahead if it matters.</p>`;
 }
 
 // ---------------------------------------------------------------- controls
