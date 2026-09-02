@@ -45,6 +45,7 @@ EDC_DRINK_SLUGS = {"happy-hour", "pints", "schooners", "wines", "wine", "cocktai
                    "beer", "beers", "drinks", "bottomless-brunch", "bougie", "jugs", "cider",
                    "bubbles", "shots", "tap-beer"}
 PRICE_RE = re.compile(r"\$\s?(\d{1,3}(?:\.\d{1,2})?)")
+PRICE_NEAR_DRINK_RE = re.compile(r"\$\s?(\d{1,3}(?:\.\d{1,2})?)(?:\s*(?:[a-z'&-]+\s+){0,3})?\s*\b(" + "|".join(DRINK_WORDS) + r")\b", re.I)
 
 
 def get_json(url, raw_dir=None, tag=None):
@@ -72,8 +73,15 @@ def is_drink(text, slugs=()):
 
 
 def price_hint(text):
-    prices = [float(p) for p in PRICE_RE.findall(text or "")]
-    prices = [p for p in prices if 1 <= p <= 100]
+    """Cheapest $ figure that sits right before a drink word ("$7 schooners", "$12 Aperol spritz");
+    falls back to the cheapest $ figure anywhere in the text."""
+    text = re.sub(r"\$\s?\d+(\.\d+)?\s*off\b", " ", NOT_DRINK_RE.sub(" ", text or ""), flags=re.I)  # "$1 off" isn't a price
+    near = [float(m.group(1)) for m in PRICE_NEAR_DRINK_RE.finditer(text)]
+    near = [p for p in near if 3 <= p <= 100]     # no drink costs under $3; $1 is wings or oysters
+    if near:
+        return min(near)
+    prices = [float(p) for p in PRICE_RE.findall(text)]
+    prices = [p for p in prices if 3 <= p <= 100]
     return min(prices) if prices else None
 
 
@@ -259,6 +267,9 @@ def main():
         specials = [s for s in specials if s["drink"]]
         for s in specials:
             s.pop("drink", None)
+    for s in specials:  # "00:00–00:00" and "00:00–23:59" mean all day
+        if s["start"] and s["end"] and (s["start"] == s["end"] or (s["start"] == "00:00" and s["end"] >= "23:59")):
+            s["start"] = s["end"] = None
     specials.sort(key=lambda s: (s["venue"] or "", s["deal"], s["id"]))
     doc = {
         "generated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),

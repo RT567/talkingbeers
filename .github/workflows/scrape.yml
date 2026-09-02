@@ -1,0 +1,26 @@
+name: scrape specials
+on:
+  schedule:
+    - cron: "17 21 * * *"   # 07:17 Sydney (AEST) daily
+    - cron: "17 4 * * *"    # 14:17 Sydney daily
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python3 scraper/fetch_specials.py
+      - name: commit if changed
+        run: |
+          git config user.name "talkingbeers-bot"
+          git config user.email "actions@users.noreply.github.com"
+          if git diff --quiet data/specials.json; then echo "no change"; exit 0; fi
+          COUNT=$(python3 -c "import json;print(json.load(open('data/specials.json'))['count'])")
+          git add data/specials.json
+          git commit -m "data: refresh specials ($COUNT drink specials)"
+          git push

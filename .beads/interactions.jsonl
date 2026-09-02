@@ -1,0 +1,1 @@
+{"id":"int-5ef87aa2","kind":"field_change","created_at":"2026-09-02T05:40:40.269071425Z","actor":"Rob","issue_id":"talkingbeers-leg","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"scraper written and run; data/specials.json committed"}}

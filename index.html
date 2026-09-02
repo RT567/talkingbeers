@@ -1,8 +1,115 @@
 <!doctype html>
+<html lang="en">
+<head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>talkingbeers</title>
-<style>body{font:18px/1.6 sans-serif;max-width:600px;margin:60px auto;padding:0 20px}</style>
-<h1>talkingbeers</h1>
-<p><i>These beers are fuckin talkin. So its time to get walkin.</i></p>
-<p>cheap drinks near you, and the best walk / Lime route between them. coming soon.</p>
+<title>talkingbeers — cheap drinks in Sydney + a pub crawl route</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+  :root { --amber:#e0a323; --amber-dark:#b8801a; --ink:#1d1a14; --paper:#fbf6ec; --muted:#6c6455; --line:#e6dcc7; --ok:#2f8f4e; --bad:#a44; }
+  * { box-sizing:border-box }
+  html,body { height:100%; margin:0 }
+  body { font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; color:var(--ink); background:var(--paper); display:flex; flex-direction:column }
+  header { padding:10px 16px; background:var(--ink); color:var(--paper); display:flex; align-items:baseline; gap:14px; flex-wrap:wrap }
+  header h1 { font-size:20px; margin:0; letter-spacing:.5px }
+  header h1 span { color:var(--amber) }
+  header .tag { font-style:italic; color:#cbbf9f; font-size:13px }
+  header .stats { margin-left:auto; font-size:12px; color:#cbbf9f }
+  header a { color:var(--amber) }
+  main { flex:1; display:flex; min-height:0 }
+  #panel { width:380px; max-width:100%; overflow:auto; border-right:1px solid var(--line); background:#fff; display:flex; flex-direction:column }
+  #map { flex:1; min-height:300px }
+  fieldset { border:0; border-bottom:1px solid var(--line); margin:0; padding:12px 16px }
+  legend { font-weight:700; font-size:12px; text-transform:uppercase; letter-spacing:.8px; color:var(--muted); padding:0; margin-bottom:6px }
+  .row { display:flex; gap:8px; align-items:center; margin:6px 0; flex-wrap:wrap }
+  .row label { font-size:13px; color:var(--muted); min-width:64px }
+  input[type=number], input[type=time], input[type=search], select { font:inherit; padding:5px 7px; border:1px solid #cfc4ab; border-radius:6px; background:#fff; color:var(--ink) }
+  input[type=number] { width:70px }
+  input[type=search] { flex:1; min-width:120px }
+  .days { display:flex; gap:3px }
+  .days button, .seg button { font:inherit; font-size:12px; padding:5px 0; border:1px solid #cfc4ab; background:#fff; color:var(--ink); border-radius:6px; cursor:pointer; flex:1 }
+  .days button.on, .seg button.on { background:var(--amber); border-color:var(--amber-dark); font-weight:700 }
+  .seg { display:flex; gap:3px; flex:1 }
+  .chips { display:flex; gap:5px; flex-wrap:wrap; margin-top:4px }
+  .chips button { font:inherit; font-size:12px; padding:3px 9px; border:1px solid #cfc4ab; border-radius:999px; background:#fff; cursor:pointer }
+  .chips button.on { background:var(--ink); color:#fff; border-color:var(--ink) }
+  button.primary { font:inherit; font-weight:700; padding:9px 14px; border:0; border-radius:8px; background:var(--amber); color:var(--ink); cursor:pointer; width:100% }
+  button.primary:hover { background:var(--amber-dark); color:#fff }
+  button.small { font:inherit; font-size:12px; padding:4px 9px; border:1px solid #cfc4ab; border-radius:6px; background:#fff; cursor:pointer }
+  .hint { font-size:12px; color:var(--muted); margin:4px 0 0 }
+  #itin { padding:0 16px 16px }
+  #itin ol { padding-left:0; list-style:none; margin:0 }
+  #itin li { border-left:3px solid var(--amber); padding:6px 10px; margin:8px 0; background:var(--paper); border-radius:0 8px 8px 0 }
+  #itin li .leg { font-size:12px; color:var(--muted); margin:-2px 0 6px 13px }
+  #itin li b { display:block }
+  #itin li .t { font-variant-numeric:tabular-nums; color:var(--muted); font-size:13px }
+  #itin li .deal { font-size:14px }
+  #itin li a { color:var(--amber-dark); font-size:12px }
+  #itin .summary { font-size:13px; color:var(--muted); margin:8px 0 }
+  .popup h3 { margin:0 0 2px; font-size:15px }
+  .popup .addr { font-size:12px; color:var(--muted); margin-bottom:6px }
+  .popup ul { margin:0; padding-left:0; list-style:none; max-height:220px; overflow:auto }
+  .popup li { padding:5px 0; border-top:1px solid var(--line); font-size:13px }
+  .popup li.on { background:#eef8f0 }
+  .popup li .w { color:var(--muted); font-size:12px }
+  .popup li .p { color:var(--ok); font-weight:700 }
+  .popup a { color:var(--amber-dark); font-size:12px }
+  .popup .pin { margin-top:6px }
+  .leaflet-popup-content { margin:10px 12px; min-width:220px }
+  .numicon { background:var(--ink); color:#fff; border-radius:50%; width:24px; height:24px; line-height:24px; text-align:center; font-weight:700; font-size:13px; border:2px solid var(--amber); box-shadow:0 1px 4px rgba(0,0,0,.4) }
+  .starticon { background:var(--ok); color:#fff; border-radius:50%; width:24px; height:24px; line-height:24px; text-align:center; font-weight:700; font-size:14px; border:2px solid #fff; box-shadow:0 1px 4px rgba(0,0,0,.4) }
+  .legend { background:rgba(255,255,255,.92); padding:4px 8px; border-radius:6px; font-size:11px; color:var(--ink); box-shadow:0 1px 3px rgba(0,0,0,.3) }
+  .legend .sw { display:inline-block; width:10px; height:10px; border-radius:50%; margin:0 3px 0 6px; vertical-align:middle }
+  .legend .sw:first-child { margin-left:0 }
+  .legend .live { background:var(--amber); border:1.5px solid var(--amber-dark) } .legend .off { background:#ccc; border:1.5px solid #999; width:8px; height:8px } .legend .start { background:var(--ok); border:1.5px solid #fff }
+  footer { font-size:11px; color:var(--muted); padding:8px 16px; border-top:1px solid var(--line); background:#fff }
+  footer a { color:var(--amber-dark) }
+  @media (max-width:760px) {
+    main { flex-direction:column-reverse }
+    #panel { width:100%; max-height:52vh; border-right:0; border-top:1px solid var(--line) }
+    #map { min-height:44vh }
+    header .stats { display:none }
+    footer { font-size:10px; padding:5px 12px }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>talking<span>beers</span></h1>
+  <span class="tag">These beers are fuckin talkin. So its time to get walkin.</span>
+  <span class="stats" id="stats">loading…</span>
+</header>
+<main>
+  <div id="panel">
+    <fieldset>
+      <legend>When</legend>
+      <div class="row"><label>Day</label><div class="days" id="days"></div></div>
+      <div class="row"><label>Kick off</label><input type="time" id="t0" step="300"> <label style="min-width:0">for</label><input type="number" id="dur" min="1" max="12" step="0.5" value="4"> <span class="hint" style="margin:0">hours</span></div>
+    </fieldset>
+    <fieldset>
+      <legend>How</legend>
+      <div class="row"><label>Get around</label><div class="seg" id="mode"><button data-v="walk" class="on">🚶 Walk</button><button data-v="lime">🛴 Lime</button></div></div>
+      <div class="row"><label>Stops</label><input type="number" id="stops" min="1" max="12" value="5"> <label style="min-width:0">stay</label><input type="number" id="dwell" min="10" max="180" step="5" value="45"> <span class="hint" style="margin:0">min each</span></div>
+      <div class="row"><label>Start</label><span id="startlbl" class="hint" style="margin:0;flex:1">Town Hall (click the map to move)</span><button class="small" id="geo">📍 me</button></div>
+    </fieldset>
+    <fieldset>
+      <legend>What</legend>
+      <div class="row"><input type="search" id="q" placeholder="filter: schooner, negroni, $6…"></div>
+      <div class="chips" id="chips">
+        <button data-k="happy">happy hour</button><button data-k="beer">beer</button><button data-k="wine">wine</button><button data-k="cocktail">cocktails</button><button data-k="spirit">spirits</button><button data-k="cheap">≤ $10</button>
+      </div>
+      <p class="hint" id="pins"></p>
+    </fieldset>
+    <fieldset>
+      <button class="primary" id="plan">Plan the crawl</button>
+      <p class="hint">Picks specials that are on when you'd get there, cheapest and closest first. Pin a venue from its popup to force it in.</p>
+    </fieldset>
+    <div id="itin"></div>
+  </div>
+  <div id="map"></div>
+</main>
+<footer>Specials from <a href="https://thehappiesthour.com/" target="_blank" rel="noopener">The Happiest Hour</a> and <a href="https://eatdrinkcheap.com.au/" target="_blank" rel="noopener">Eat Drink Cheap</a>, refreshed <span id="gen">…</span>. Venue-submitted, so check before you commit. Map © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>. Legs are straight-line × 1.3, not real routes. Drink responsibly-ish. <a href="https://github.com/RT567/talkingbeers" target="_blank" rel="noopener">source</a></footer>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
