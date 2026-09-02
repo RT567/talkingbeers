@@ -28,9 +28,8 @@ const state = {
 
 // ---------------------------------------------------------------- data
 async function load() {
-  const r = await fetch("data/specials.json");
+  const r = await fetch("data/specials.json", { cache: "no-cache" });
   const doc = await r.json();
-  $("gen").textContent = doc.generated.slice(0, 10);
   // group specials into venues; merge same-named venues within 300 m (both sources list many pubs)
   const venues = [];
   const norm = s => (s || "").toLowerCase().replace(/^the\s+/, "").replace(/[^a-z0-9]/g, "");
@@ -41,7 +40,7 @@ async function load() {
     v.specials.push(s);
   }
   state.venues = venues;
-  $("stats").textContent = `${doc.specials.length} drink specials · ${venues.length} venues · Sydney`;
+  $("stats").textContent = `${doc.specials.length} drink specials · ${venues.length} venues · Sydney · data ${doc.generated.slice(0, 10)}`;
 }
 
 // ---------------------------------------------------------------- filters
