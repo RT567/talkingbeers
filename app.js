@@ -171,7 +171,7 @@ L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_M
 map.attributionControl.setPrefix(false);  // drop the "Leaflet" link; Esri's terms require their credit to stay
 const venueLayer = L.layerGroup().addTo(map), routeLayer = L.layerGroup().addTo(map);
 const legend = L.control({ position: "bottomleft" });
-legend.onAdd = () => { const d = L.DomUtil.create("div", "legend"); d.innerHTML = '<span class="sw live"></span> on during your window <span class="sw off"></span> other times <span class="sw start"></span> start'; return d; };
+legend.onAdd = () => { const d = L.DomUtil.create("div", "legend"); d.innerHTML = '<span class="sw live"></span> on during your window <span class="sw off"></span> other times <span class="sw start">⚑</span> start'; return d; };
 legend.addTo(map);
 const startMarker = L.marker([state.start.lat, state.start.lng], { icon: L.divIcon({ className: "", html: '<div class="starticon">⚑</div>', iconSize: [24, 24], iconAnchor: [12, 12] }), draggable: true });
 startMarker.on("dragend", () => setStart(startMarker.getLatLng()));
