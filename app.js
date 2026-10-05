@@ -215,6 +215,14 @@ function popupHtml(v, T0, T1) {
   return `<div class="popup"><h3>${esc(v.name)}</h3><div class="addr">${esc(v.address)}</div><ul>${items}</ul><div class="pin"><button class="small" onclick="TB.pin(${v.id})">${pinned ? "✕ unpin" : "📌 pin to crawl"}</button></div></div>`;
 }
 
+// Shown times snap to the quarter hour (Rob: "21:00–22:00", not "21:02–21:57"). Each stop still starts no
+// earlier than the last one ends and lasts at least a quarter hour; the routing maths keeps exact minutes.
+const roundQ = m => Math.round(m / 15) * 15;
+function quarterTimes(r) {
+  let prev = Math.ceil(r.T0 / 15) * 15;  // never before kick-off
+  for (const x of r.stops) { x.showArrive = Math.max(roundQ(x.arrive), prev); x.showLeave = Math.max(roundQ(x.leave), x.showArrive + 15); prev = x.showLeave; }
+}
+
 function renderRoute() {
   routeLayer.clearLayers();
   const r = state.route, el = $("itin");
@@ -224,10 +232,11 @@ function renderRoute() {
   else L.polyline(pts, { color: "#1d1a14", weight: 3, dashArray: "6 6", opacity: .8 }).addTo(routeLayer);
   r.stops.forEach((x, i) => L.marker([x.c.v.lat, x.c.v.lng], { icon: L.divIcon({ className: "", html: `<div class="numicon">${i + 1}</div>`, iconSize: [24, 24], iconAnchor: [12, 12] }), zIndexOffset: 1000 }).bindPopup(() => popupHtml(x.c.v, r.T0, r.T1), { maxWidth: 320 }).addTo(routeLayer));
   map.fitBounds(r.real ? r.real.shape : pts, { padding: [30, 30] });
+  quarterTimes(r);
   const distTot = r.stops.reduce((a, x) => a + x.dist, 0), trTot = r.stops.reduce((a, x) => a + x.tr + x.wait, 0);
   const modeLbl = "walking";
-  el.innerHTML = `<p class="summary"><b>${r.stops.length} stops</b>, ${distTot.toFixed(1)} km ${modeLbl}, ${Math.round(trTot)} min in transit. ${DAYLBL[state.day]} ${fmt(r.T0)} → ${fmt(r.stops[r.stops.length - 1].leave)}.</p><ol>` +
-    r.stops.map((x, i) => `<li><div class="leg">${x.dist.toFixed(1)} km · ${Math.round(x.tr)} min ${modeLbl}${x.wait ? ` · wait ${Math.round(x.wait)} min for it to start` : ""}${r.real?.[i]?.steps.length ? ` <details class="dirs"><summary>directions</summary><ol>${r.real[i].steps.map(t => `<li>${esc(t)}</li>`).join("")}</ol></details>` : ""}</div><b>${i + 1}. ${esc(x.c.v.name)} <span class="t">${fmt(x.arrive)}–${fmt(x.leave)}</span>${x.late ? ' <span class="late">⚠ might miss it</span>' : ""}</b><span class="deal">${esc(x.c.s.deal)}${x.c.s.price != null ? ` · $${x.c.s.price}` : ""}</span><br><span class="t">on ${fmtWin(x.c.s)}</span> · <a href="${esc(x.c.s.source_url)}" target="_blank" rel="noopener">source ↗</a></li>`).join("") +
+  el.innerHTML = `<p class="summary"><b>${r.stops.length} stops</b>, ${distTot.toFixed(1)} km ${modeLbl}, ${Math.round(trTot)} min in transit. ${DAYLBL[state.day]} ${fmt(r.T0)} → ${fmt(r.stops[r.stops.length - 1].showLeave)}.</p><ol>` +
+    r.stops.map((x, i) => `<li><div class="leg">${x.dist.toFixed(1)} km · ${Math.round(x.tr)} min ${modeLbl}${r.real?.[i]?.steps.length ? ` <details class="dirs"><summary>directions</summary><ol>${r.real[i].steps.map(t => `<li>${esc(t)}</li>`).join("")}</ol></details>` : ""}</div><b>${i + 1}. ${esc(x.c.v.name)} <span class="t">${fmt(x.showArrive)}–${fmt(x.showLeave)}</span>${x.late ? ' <span class="late">⚠ might miss it</span>' : ""}</b><span class="deal">${esc(x.c.s.deal)}${x.c.s.price != null ? ` · $${x.c.s.price}` : ""}</span><br><span class="t">on ${fmtWin(x.c.s)}</span> · <a href="${esc(x.c.s.source_url)}" target="_blank" rel="noopener">source ↗</a></li>`).join("") +
     `</ol><p class="hint">${r.real ? "Street routes and times from OSRM." : r.routeError ? "Routing server didn't answer — straight-line distances × 1.3." : "Fetching street routes…"} Windows come from venue listings, so ring ahead if it matters.</p>`;
 }
 
@@ -238,7 +247,7 @@ DAYLBL.forEach((l, i) => { const b = document.createElement("button"); b.textCon
 function syncDays() { [...daysEl.children].forEach((b, i) => b.classList.toggle("on", i === state.day)); }
 $("t0").onchange = $("t1").onchange = renderVenues;
 $("plan").onclick = plan;
-{ const now = new Date(), m = Math.round((now.getHours() * 60 + now.getMinutes()) / 5) * 5; $("t0").value = fmt(m); $("t1").value = fmt(m + 240); }  // now → 4 h later
+{ const now = new Date(), m = roundQ(now.getHours() * 60 + now.getMinutes()); $("t0").value = fmt(m); $("t1").value = fmt(m + 240); }  // now (to the quarter hour) → 4 h later
 syncDays();
 load().then(renderVenues).catch(e => { $("stats").textContent = "couldn't load data/specials.json"; console.error(e); });
 })();

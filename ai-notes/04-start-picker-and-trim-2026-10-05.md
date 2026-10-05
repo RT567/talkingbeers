@@ -39,3 +39,8 @@ Stay length and stop count "can be fudged" by up to ~30 min; what matters is lan
 - Verified: 16:00–20:00 × 5 → 5 stops ending 19:47; 21:00–01:00 × 4 → 4 stops ending 01:00; no waits.
 - A stuck-drag scare on desktop turned out to be Rob and the agent driving the same Chrome window at once;
   no drag code was changed.
+- Shown stop times snap to the quarter hour (`quarterTimes()` in renderRoute; Rob: "21:00–22:00, not
+  21:02–21:57"): each stop starts no earlier than the previous one ends or the kick-off (rounded up), and
+  lasts ≥ 15 min. Routing still uses exact minutes. Time inputs step 15 min; "now" defaults to the nearest
+  quarter. The "wait N min" note was dropped (rounded times make it noise). 18:00–22:00 × 4 →
+  18:00–19:00, 19:00–20:00, 20:00–21:00, 21:00–22:00.
