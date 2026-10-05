@@ -26,3 +26,16 @@ there…" hint. Must work on phones and desktop. Also drop the "Leaflet | Tiles 
 Picker shows with no header/panel; pin tip == map centre; dragging the map moves it under the pin;
 Start here → panel + header appear, day/time = now; Plan → 5-stop walking crawl with OSRM street routes;
 "move" returns to the picker; no horizontal scroll on mobile.
+
+## Later the same day — one simple form, fudged timings
+Rob: the When/How sections didn't make sense; just ask day, start time, finish time, number of stops.
+Stay length and stop count "can be fudged" by up to ~30 min; what matters is landing people on specials.
+- Panel is one fieldset: Day · Time [start] to [finish] (finish ≤ start wraps past midnight) · Stops · From
+  (the ⚑, with "move"). Kick-off defaults to now (rounded to 5 min), finish to 4 h later. The duration and
+  "stay N min" inputs are gone.
+- Router: target stay = (finish − start) / stops − 5 min (min 15). A venue up to `FUDGE` = 30 min before its
+  special starts is still eligible; instead of "wait N min", the previous stop's stay is stretched so you
+  walk in as it starts (only the first stop can show a wait). `retime()` does the same with real OSRM legs.
+- Verified: 16:00–20:00 × 5 → 5 stops ending 19:47; 21:00–01:00 × 4 → 4 stops ending 01:00; no waits.
+- A stuck-drag scare on desktop turned out to be Rob and the agent driving the same Chrome window at once;
+  no drag code was changed.

@@ -92,14 +92,10 @@
 <main>
   <div id="panel">
     <fieldset>
-      <legend>When</legend>
       <div class="row"><label>Day</label><div class="days" id="days"></div></div>
-      <div class="row"><label>Kick off</label><input type="time" id="t0" step="300"> <label style="min-width:0">for</label><input type="number" id="dur" min="1" max="12" step="0.5" value="4"> <span class="hint" style="margin:0">hours</span></div>
-    </fieldset>
-    <fieldset>
-      <legend>How</legend>
-      <div class="row"><label>Stops</label><input type="number" id="stops" min="1" max="12" value="5"> <label style="min-width:0">stay</label><input type="number" id="dwell" min="10" max="180" step="5" value="45"> <span class="hint" style="margin:0">min each</span></div>
-      <div class="row"><label>Start</label><span id="startlbl" class="hint" style="margin:0;flex:1"></span><button class="small" id="move">move</button></div>
+      <div class="row"><label>Time</label><input type="time" id="t0" step="300"> <label style="min-width:0">to</label><input type="time" id="t1" step="300"></div>
+      <div class="row"><label>Stops</label><input type="number" id="stops" min="1" max="12" value="5"></div>
+      <div class="row"><label>From</label><span id="startlbl" class="hint" style="margin:0;flex:1"></span><button class="small" id="move">move</button></div>
     </fieldset>
     <fieldset>
       <button class="primary" id="plan">Plan the crawl</button>

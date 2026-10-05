@@ -3,7 +3,9 @@
 const DAYS = ["mon","tue","wed","thu","fri","sat","sun"];
 const DAYLBL = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
 const WALK_KMH = 4.8;
-const DETOUR = 1.3, MAX_WAIT = 30, MIN_DWELL = 15, ITER = 60;
+// FUDGE: how far a stop's stay may stretch to line up with the next special (Rob: getting people to specials
+// matters more than even stays; up to ~30 min either way is fine).
+const DETOUR = 1.3, FUDGE = 30, MIN_DWELL = 15, ITER = 60;
 const DEFAULT_START = { lat: -33.8731, lng: 151.2069 };  // Town Hall: where the picker opens
 
 const $ = id => document.getElementById(id);
@@ -59,8 +61,8 @@ const value = s => 10 + (s.price != null ? Math.max(0, 15 - s.price) : 3) + (/ha
 
 // ---------------------------------------------------------------- router (greedy randomised, time windows)
 function plan() {
-  const T0 = toMin($("t0").value), T1 = T0 + Number($("dur").value) * 60;
-  const maxStops = Number($("stops").value), dwellPref = Number($("dwell").value);
+  const [T0, T1] = crawlWindow(), maxStops = Number($("stops").value);
+  const dwellPref = Math.max(MIN_DWELL, (T1 - T0) / maxStops - 5);  // even split, less a few minutes' walk
   // candidates: (venue, special, window) overlapping the crawl
   const cands = [];
   for (const v of state.venues) for (const s of v.specials) {
@@ -78,13 +80,14 @@ function plan() {
         if (visited.has(c.v.id)) continue;
         const tr = travelMin(pos, c.v);
         let arrive = t + tr, wait = 0;
-        if (arrive < c.ws) { wait = c.ws - arrive; if (wait > MAX_WAIT) continue; arrive = c.ws; }
+        if (arrive < c.ws) { wait = c.ws - arrive; if (wait > FUDGE) continue; arrive = c.ws; }
         if (arrive + MIN_DWELL > c.we || arrive + MIN_DWELL > T1) continue;
         opts.push({ c, tr, wait, arrive, score: c.val / (tr + wait + 8) });
       }
       if (!opts.length) break;
       opts.sort((a, b) => b.score - a.score);
       const pick = opts[it === 0 ? 0 : Math.floor(Math.random() * Math.min(3, opts.length))];
+      if (pick.wait && stops.length) { stops[stops.length - 1].leave += pick.wait; pick.wait = 0; }  // stay longer at the last one instead of waiting
       const dwell = Math.max(MIN_DWELL, Math.min(dwellPref, pick.c.we - pick.arrive, T1 - pick.arrive));
       stops.push({ ...pick, leave: pick.arrive + dwell, dist: km(pos, pick.c.v) * DETOUR });
       visited.add(pick.c.v.id); pos = pick.c.v; t = pick.arrive + dwell; travelTot += pick.tr; valTot += pick.c.val;
@@ -152,7 +155,11 @@ function retime(r) {
     const leg = r.real[i], dwell = x.leave - x.arrive;
     x.dist = leg.km; x.tr = leg.min;
     let arrive = t + leg.min; x.wait = 0;
-    if (arrive < x.c.ws) { x.wait = x.c.ws - arrive; arrive = x.c.ws; }
+    if (arrive < x.c.ws) {  // early: stay longer at the previous stop (or wait, before the first)
+      const w = x.c.ws - arrive;
+      if (i) r.stops[i - 1].leave += w; else x.wait = w;
+      arrive = x.c.ws;
+    }
     x.arrive = arrive; x.leave = arrive + dwell; x.late = arrive + MIN_DWELL > x.c.we;
     t = x.leave;
   });
@@ -168,7 +175,7 @@ legend.onAdd = () => { const d = L.DomUtil.create("div", "legend"); d.innerHTML 
 legend.addTo(map);
 const startMarker = L.marker([state.start.lat, state.start.lng], { icon: L.divIcon({ className: "", html: '<div class="starticon">⚑</div>', iconSize: [24, 24], iconAnchor: [12, 12] }), draggable: true });
 startMarker.on("dragend", () => setStart(startMarker.getLatLng()));
-function setStart(ll) { state.start = { lat: ll.lat, lng: ll.lng }; startMarker.setLatLng(ll); $("startlbl").textContent = `${ll.lat.toFixed(4)}, ${ll.lng.toFixed(4)} (drag the ⚑ to adjust)`; }
+function setStart(ll) { state.start = { lat: ll.lat, lng: ll.lng }; startMarker.setLatLng(ll); $("startlbl").textContent = "the ⚑ on the map (drag to adjust)"; }
 
 // Start picker: the map opens full-screen with a pin fixed at its centre; "Start here" takes the centre.
 // Layout changes resize the map, so keep the same point centred across them.
@@ -183,7 +190,7 @@ $("here").onclick = () => { setStart(map.getCenter()); state.started = true; set
 $("move").onclick = () => setPicking(true);
 $("geo").onclick = () => navigator.geolocation?.getCurrentPosition(p => map.setView([p.coords.latitude, p.coords.longitude], 15), () => alert("couldn't get your location"));
 
-function crawlWindow() { const T0 = toMin($("t0").value); return [T0, T0 + Number($("dur").value) * 60]; }
+function crawlWindow() { const T0 = toMin($("t0").value); let T1 = toMin($("t1").value); if (T1 <= T0) T1 += 1440; return [T0, T1]; }  // finish past midnight wraps
 function venueOnDuring(v, T0, T1) { return v.specials.some(s => windowsFor(s, state.day).some(([ws, we]) => ws < T1 && we > T0)); }
 
 function renderVenues() {
@@ -229,9 +236,9 @@ window.TB = { pin(id) { state.pins.has(id) ? state.pins.delete(id) : state.pins.
 const daysEl = $("days");
 DAYLBL.forEach((l, i) => { const b = document.createElement("button"); b.textContent = l; b.onclick = () => { state.day = i; syncDays(); renderVenues(); }; daysEl.appendChild(b); });
 function syncDays() { [...daysEl.children].forEach((b, i) => b.classList.toggle("on", i === state.day)); }
-$("t0").onchange = $("dur").onchange = renderVenues;
+$("t0").onchange = $("t1").onchange = renderVenues;
 $("plan").onclick = plan;
-{ const now = new Date(); const m = Math.round(now.getMinutes() / 5) * 5; $("t0").value = `${pad((now.getHours() + Math.floor(m / 60)) % 24)}:${pad(m % 60)}`; }
+{ const now = new Date(), m = Math.round((now.getHours() * 60 + now.getMinutes()) / 5) * 5; $("t0").value = fmt(m); $("t1").value = fmt(m + 240); }  // now → 4 h later
 syncDays();
 load().then(renderVenues).catch(e => { $("stats").textContent = "couldn't load data/specials.json"; console.error(e); });
 })();
