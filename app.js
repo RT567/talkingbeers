@@ -2,9 +2,9 @@
 (() => {
 const DAYS = ["mon","tue","wed","thu","fri","sat","sun"];
 const DAYLBL = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
-const MODES = { walk: { kmh: 4.8, overhead: 0 }, lime: { kmh: 14, overhead: 3 } };  // overhead = minutes to find/unlock a bike per leg
+const WALK_KMH = 4.8;
 const DETOUR = 1.3, MAX_WAIT = 30, MIN_DWELL = 15, ITER = 60;
-const DEFAULT_START = { lat: -33.8731, lng: 151.2069, name: "Town Hall" };
+const DEFAULT_START = { lat: -33.8731, lng: 151.2069 };  // Town Hall: where the picker opens
 
 const $ = id => document.getElementById(id);
 const pad = n => String(n).padStart(2, "0");
@@ -18,12 +18,11 @@ function km(a, b) {  // haversine
   const x = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * Math.PI / 180) * Math.cos(b.lat * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
   return 2 * R * Math.asin(Math.sqrt(x));
 }
-const travelMin = (a, b, mode) => { const m = MODES[mode]; return km(a, b) * DETOUR / m.kmh * 60 + m.overhead; };
+const travelMin = (a, b) => km(a, b) * DETOUR / WALK_KMH * 60;
 
 // ---------------------------------------------------------------- state
 const state = {
-  day: (new Date().getDay() + 6) % 7, mode: "walk", start: { ...DEFAULT_START },
-  chips: new Set(), q: "", pins: new Set(), venues: [], route: null,
+  day: (new Date().getDay() + 6) % 7, start: { ...DEFAULT_START }, pins: new Set(), venues: [], route: null,
 };
 
 // ---------------------------------------------------------------- data
@@ -43,21 +42,7 @@ async function load() {
   $("stats").textContent = `${doc.specials.length} drink specials · ${venues.length} venues · Sydney · data ${doc.generated.slice(0, 10)}`;
 }
 
-// ---------------------------------------------------------------- filters
-function specialMatches(s) {
-  const text = `${s.deal} ${s.blurb} ${s.tags.join(" ")}`.toLowerCase();
-  if (state.q && !text.includes(state.q.toLowerCase()) && !s.venue.toLowerCase().includes(state.q.toLowerCase())) return false;
-  for (const c of state.chips) {
-    if (c === "happy" && !/happy\s*hour/.test(text)) return false;
-    if (c === "beer" && !/\b(beer|schooner|pint|middy|pot|jug|lager|ale|tap|stout|pilsner|tinn|stubb|guinness|coopers|carlton|reschs|tooheys|young henry|4 pines|balter|xxxx|vb)\b/.test(text)) return false;
-    if (c === "wine" && !/\b(wine|prosecco|bubbles|champagne|ros[eé]|sparkling|shiraz|chardonnay|sauv|pinot)\b/.test(text)) return false;
-    if (c === "cocktail" && !/\b(cocktail|spritz|margarita|marg|martini|negroni|mojito|daiquiri|paloma|sour|highball|sangria|mimosa)\b/.test(text)) return false;
-    if (c === "spirit" && !/\b(spirit|gin|vodka|rum|whisk|bourbon|tequila|shot|schnapps|highball)\b/.test(text)) return false;
-    if (c === "cheap" && !(s.price != null && s.price <= 10)) return false;
-  }
-  return true;
-}
-
+// ---------------------------------------------------------------- time windows
 // windows on the chosen day, as minutes relative to 00:00 of that day (can spill past 1440 or start negative)
 function windowsFor(s, day) {
   const out = [];
@@ -75,11 +60,10 @@ const value = s => 10 + (s.price != null ? Math.max(0, 15 - s.price) : 3) + (/ha
 // ---------------------------------------------------------------- router (greedy randomised, time windows)
 function plan() {
   const T0 = toMin($("t0").value), T1 = T0 + Number($("dur").value) * 60;
-  const maxStops = Number($("stops").value), dwellPref = Number($("dwell").value), mode = state.mode;
+  const maxStops = Number($("stops").value), dwellPref = Number($("dwell").value);
   // candidates: (venue, special, window) overlapping the crawl
   const cands = [];
   for (const v of state.venues) for (const s of v.specials) {
-    if (!specialMatches(s)) continue;
     for (const [ws, we] of windowsFor(s, state.day)) {
       if (we < T0 + MIN_DWELL || ws > T1 - MIN_DWELL) continue;
       cands.push({ v, s, ws, we, val: value(s) + (state.pins.has(v.id) ? 1000 : 0) });
@@ -92,7 +76,7 @@ function plan() {
       const opts = [];
       for (const c of cands) {
         if (visited.has(c.v.id)) continue;
-        const tr = travelMin(pos, c.v, mode);
+        const tr = travelMin(pos, c.v);
         let arrive = t + tr, wait = 0;
         if (arrive < c.ws) { wait = c.ws - arrive; if (wait > MAX_WAIT) continue; arrive = c.ws; }
         if (arrive + MIN_DWELL > c.we || arrive + MIN_DWELL > T1) continue;
@@ -107,29 +91,29 @@ function plan() {
     }
     const pinsHit = stops.filter(x => state.pins.has(x.c.v.id)).length;
     const key = [pinsHit, stops.length, valTot, -travelTot];
-    if (!best || cmp(key, best.key) > 0) best = { stops, key, T0, T1, mode };
+    if (!best || cmp(key, best.key) > 0) best = { stops, key, T0, T1 };
   }
   state.route = best;
   renderRoute();
   $("itin").scrollIntoView({ behavior: "smooth", block: "nearest" });
   if (best && best.stops.length) {
     const pts = [state.start, ...best.stops.map(x => x.c.v)];
-    fetchRealRoute(pts, best.mode).then(legs => { if (state.route !== best) return; best.real = legs; retime(best); renderRoute(); })
+    fetchRealRoute(pts).then(legs => { if (state.route !== best) return; best.real = legs; retime(best); renderRoute(); })
       .catch(e => { console.warn("routing failed, keeping straight lines", e); best.routeError = true; renderRoute(); });
   }
 }
 const cmp = (a, b) => { for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return a[i] > b[i] ? 1 : -1; return 0; };
 
 // ---------------------------------------------------------------- real routes (OSRM, FOSSGIS public instance)
-const OSRM = { walk: "https://routing.openstreetmap.de/routed-foot/route/v1/foot/", lime: "https://routing.openstreetmap.de/routed-bike/route/v1/bike/" };
-async function fetchRealRoute(points, mode) {
+const OSRM = "https://routing.openstreetmap.de/routed-foot/route/v1/foot/";
+async function fetchRealRoute(points) {
   const coords = points.map(p => `${p.lng.toFixed(6)},${p.lat.toFixed(6)}`).join(";");
-  const r = await fetch(`${OSRM[mode]}${coords}?overview=simplified&geometries=geojson&steps=true`);
+  const r = await fetch(`${OSRM}${coords}?overview=simplified&geometries=geojson&steps=true`);
   if (!r.ok) throw new Error(`OSRM ${r.status}`);
   const j = await r.json();
   if (j.code !== "Ok" || !j.routes?.length) throw new Error(j.code || "no route");
   const route = j.routes[0];
-  const legs = route.legs.map(leg => ({ km: leg.distance / 1000, min: leg.duration / 60 + MODES[mode].overhead, steps: leg.steps.map(stepText).filter(Boolean) }));
+  const legs = route.legs.map(leg => ({ km: leg.distance / 1000, min: leg.duration / 60, steps: leg.steps.map(stepText).filter(Boolean) }));
   legs.shape = simplify(route.geometry.coordinates.map(([lng, lat]) => [lat, lng]), 20);  // drop kerb-to-kerb jogs under ~20 m
   return legs;
 }
@@ -176,37 +160,47 @@ function retime(r) {
 
 // ---------------------------------------------------------------- map
 const map = L.map("map", { zoomControl: true, zoomSnap: 0.25, zoomDelta: 0.5, wheelPxPerZoomLevel: 120 }).setView([DEFAULT_START.lat, DEFAULT_START.lng], 14);
-L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}", { maxZoom: 19, attribution: 'Tiles © <a href="https://www.esri.com/">Esri</a>' }).addTo(map);
+L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}", { maxZoom: 19, attribution: '© <a href="https://www.esri.com/">Esri</a>' }).addTo(map);
+map.attributionControl.setPrefix(false);  // drop the "Leaflet" link; Esri's terms require their credit to stay
 const venueLayer = L.layerGroup().addTo(map), routeLayer = L.layerGroup().addTo(map);
 const legend = L.control({ position: "bottomleft" });
 legend.onAdd = () => { const d = L.DomUtil.create("div", "legend"); d.innerHTML = '<span class="sw live"></span> on during your window <span class="sw off"></span> other times <span class="sw start"></span> start'; return d; };
 legend.addTo(map);
-let startMarker = L.marker([state.start.lat, state.start.lng], { icon: L.divIcon({ className: "", html: '<div class="starticon">⚑</div>', iconSize: [24, 24], iconAnchor: [12, 12] }), draggable: true }).addTo(map);
-startMarker.on("dragend", () => setStart(startMarker.getLatLng(), "dropped pin"));
-map.on("click", e => setStart(e.latlng, "map click"));
-function setStart(ll, name) { state.start = { lat: ll.lat, lng: ll.lng, name }; startMarker.setLatLng(ll); $("startlbl").textContent = `${name} (${ll.lat.toFixed(4)}, ${ll.lng.toFixed(4)})`; }
-$("geo").onclick = () => navigator.geolocation?.getCurrentPosition(p => { setStart({ lat: p.coords.latitude, lng: p.coords.longitude }, "you"); map.setView([p.coords.latitude, p.coords.longitude], 15); }, () => alert("couldn't get your location"));
+const startMarker = L.marker([state.start.lat, state.start.lng], { icon: L.divIcon({ className: "", html: '<div class="starticon">⚑</div>', iconSize: [24, 24], iconAnchor: [12, 12] }), draggable: true });
+startMarker.on("dragend", () => setStart(startMarker.getLatLng()));
+function setStart(ll) { state.start = { lat: ll.lat, lng: ll.lng }; startMarker.setLatLng(ll); $("startlbl").textContent = `${ll.lat.toFixed(4)}, ${ll.lng.toFixed(4)} (drag the ⚑ to adjust)`; }
+
+// Start picker: the map opens full-screen with a pin fixed at its centre; "Start here" takes the centre.
+// Layout changes resize the map, so keep the same point centred across them.
+function setPicking(on) {
+  const c = map.getCenter();
+  document.body.classList.toggle("picking", on);
+  map.invalidateSize();
+  map.setView(on ? (state.started ? [state.start.lat, state.start.lng] : c) : c, map.getZoom(), { animate: false });
+  if (on) { map.closePopup(); startMarker.remove(); }
+}
+$("here").onclick = () => { setStart(map.getCenter()); state.started = true; setPicking(false); startMarker.addTo(map); };
+$("move").onclick = () => setPicking(true);
+$("geo").onclick = () => navigator.geolocation?.getCurrentPosition(p => map.setView([p.coords.latitude, p.coords.longitude], 15), () => alert("couldn't get your location"));
 
 function crawlWindow() { const T0 = toMin($("t0").value); return [T0, T0 + Number($("dur").value) * 60]; }
-function venueOnDuring(v, T0, T1) { return v.specials.some(s => specialMatches(s) && windowsFor(s, state.day).some(([ws, we]) => ws < T1 && we > T0)); }
+function venueOnDuring(v, T0, T1) { return v.specials.some(s => windowsFor(s, state.day).some(([ws, we]) => ws < T1 && we > T0)); }
 
 function renderVenues() {
   venueLayer.clearLayers();
   const [T0, T1] = crawlWindow();
   let on = 0;
   for (const v of state.venues) {
-    const matching = v.specials.filter(specialMatches);
-    if (!matching.length) continue;
     const live = venueOnDuring(v, T0, T1); if (live) on++;
     const pinned = state.pins.has(v.id);
     const m = L.circleMarker([v.lat, v.lng], { radius: live ? 7 : 4, color: pinned ? "#1d1a14" : live ? "#b8801a" : "#fff", weight: pinned ? 3 : 1.5, fillColor: live ? "#e0a323" : "#7a7a7a", fillOpacity: .9 });
     m.bindPopup(() => popupHtml(v, T0, T1), { maxWidth: 320 });
     m.addTo(venueLayer);
   }
-  $("pins").textContent = state.pins.size ? `Pinned: ${[...state.pins].map(id => state.venues[id].name).join(", ")}` : "";
+  $("pins").textContent = state.pins.size ? `Pinned: ${[...state.pins].map(id => state.venues[id].name).join(", ")}` : "Tap a venue and pin it to force it into the crawl.";
 }
 function popupHtml(v, T0, T1) {
-  const items = v.specials.filter(specialMatches).map(s => {
+  const items = v.specials.map(s => {
     const live = windowsFor(s, state.day).some(([ws, we]) => ws < T1 && we > T0);
     return `<li class="${live ? "on" : ""}"><b>${esc(s.deal)}</b> ${s.price != null ? `<span class="p">$${s.price}</span>` : ""}<br><span class="w">${fmtDays(s.days)} ${fmtWin(s)}</span>${s.blurb ? `<br>${esc(s.blurb.slice(0, 160))}${s.blurb.length > 160 ? "…" : ""}` : ""} <a href="${esc(s.source_url)}" target="_blank" rel="noopener">${s.source === "hh" ? "Happiest Hour" : "Eat Drink Cheap"} ↗</a></li>`;
   }).join("");
@@ -217,14 +211,14 @@ function popupHtml(v, T0, T1) {
 function renderRoute() {
   routeLayer.clearLayers();
   const r = state.route, el = $("itin");
-  if (!r || !r.stops.length) { el.innerHTML = `<p class="summary">No specials reachable in that window. Try a longer crawl, another day, or fewer filters.</p>`; return; }
+  if (!r || !r.stops.length) { el.innerHTML = `<p class="summary">No specials reachable in that window. Try a longer crawl, another day, or a more central start.</p>`; return; }
   const pts = [[state.start.lat, state.start.lng], ...r.stops.map(x => [x.c.v.lat, x.c.v.lng])];
   if (r.real) L.polyline(r.real.shape, { color: "#1d1a14", weight: 4, opacity: .8, smoothFactor: 1.5, lineJoin: "round", lineCap: "round" }).addTo(routeLayer);
   else L.polyline(pts, { color: "#1d1a14", weight: 3, dashArray: "6 6", opacity: .8 }).addTo(routeLayer);
   r.stops.forEach((x, i) => L.marker([x.c.v.lat, x.c.v.lng], { icon: L.divIcon({ className: "", html: `<div class="numicon">${i + 1}</div>`, iconSize: [24, 24], iconAnchor: [12, 12] }), zIndexOffset: 1000 }).bindPopup(() => popupHtml(x.c.v, r.T0, r.T1), { maxWidth: 320 }).addTo(routeLayer));
   map.fitBounds(r.real ? r.real.shape : pts, { padding: [30, 30] });
   const distTot = r.stops.reduce((a, x) => a + x.dist, 0), trTot = r.stops.reduce((a, x) => a + x.tr + x.wait, 0);
-  const modeLbl = r.mode === "walk" ? "walking" : "on a Lime";
+  const modeLbl = "walking";
   el.innerHTML = `<p class="summary"><b>${r.stops.length} stops</b>, ${distTot.toFixed(1)} km ${modeLbl}, ${Math.round(trTot)} min in transit. ${DAYLBL[state.day]} ${fmt(r.T0)} → ${fmt(r.stops[r.stops.length - 1].leave)}.</p><ol>` +
     r.stops.map((x, i) => `<li><div class="leg">${x.dist.toFixed(1)} km · ${Math.round(x.tr)} min ${modeLbl}${x.wait ? ` · wait ${Math.round(x.wait)} min for it to start` : ""}${r.real?.[i]?.steps.length ? ` <details class="dirs"><summary>directions</summary><ol>${r.real[i].steps.map(t => `<li>${esc(t)}</li>`).join("")}</ol></details>` : ""}</div><b>${i + 1}. ${esc(x.c.v.name)} <span class="t">${fmt(x.arrive)}–${fmt(x.leave)}</span>${x.late ? ' <span class="late">⚠ might miss it</span>' : ""}</b><span class="deal">${esc(x.c.s.deal)}${x.c.s.price != null ? ` · $${x.c.s.price}` : ""}</span><br><span class="t">on ${fmtWin(x.c.s)}</span> · <a href="${esc(x.c.s.source_url)}" target="_blank" rel="noopener">source ↗</a></li>`).join("") +
     `</ol><p class="hint">${r.real ? "Street routes and times from OSRM." : r.routeError ? "Routing server didn't answer — straight-line distances × 1.3." : "Fetching street routes…"} Windows come from venue listings, so ring ahead if it matters.</p>`;
@@ -235,9 +229,6 @@ window.TB = { pin(id) { state.pins.has(id) ? state.pins.delete(id) : state.pins.
 const daysEl = $("days");
 DAYLBL.forEach((l, i) => { const b = document.createElement("button"); b.textContent = l; b.onclick = () => { state.day = i; syncDays(); renderVenues(); }; daysEl.appendChild(b); });
 function syncDays() { [...daysEl.children].forEach((b, i) => b.classList.toggle("on", i === state.day)); }
-$("mode").onclick = e => { const b = e.target.closest("button"); if (!b) return; state.mode = b.dataset.v; [...$("mode").children].forEach(x => x.classList.toggle("on", x === b)); };
-$("chips").onclick = e => { const b = e.target.closest("button"); if (!b) return; const k = b.dataset.k; state.chips.has(k) ? state.chips.delete(k) : state.chips.add(k); b.classList.toggle("on"); renderVenues(); };
-$("q").oninput = () => { state.q = $("q").value.trim(); renderVenues(); };
 $("t0").onchange = $("dur").onchange = renderVenues;
 $("plan").onclick = plan;
 { const now = new Date(); const m = Math.round(now.getMinutes() / 5) * 5; $("t0").value = `${pad((now.getHours() + Math.floor(m / 60)) % 24)}:${pad(m % 60)}`; }
