@@ -44,3 +44,6 @@ Stay length and stop count "can be fudged" by up to ~30 min; what matters is lan
   lasts ≥ 15 min. Routing still uses exact minutes. Time inputs step 15 min; "now" defaults to the nearest
   quarter. The "wait N min" note was dropped (rounded times make it noise). 18:00–22:00 × 4 →
   18:00–19:00, 19:00–20:00, 20:00–21:00, 21:00–22:00.
+- Legend: the "start" swatch shows the ⚑ like the map marker (14 px green disc with the flag).
+- A desktop "map follows the mouse" report was Rob and the agent driving the same Chrome window at once;
+  no drag code changed.
